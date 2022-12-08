@@ -237,7 +237,7 @@ class Client:
         if attachment_index:
             for attachment_field_name in attachment_index:
                 atf = attachment_field_name.replace(" ", "_")
-                attachment_whitelist = ["IMAGE", "VIDEO", "TEXT", "HTML"]
+                attachment_whitelist = ["IMAGE", "VIDEO", "RAW_TEXT", "HTML", "TEXT_URL"]
                 if attachment_index[attachment_field_name] not in attachment_whitelist:
                     print(f'Error: Invalid value for attachment_index key {attachment_field_name} : {attachment_index[attachment_field_name]}\n must be one of {attachment_whitelist}')
                     return None
