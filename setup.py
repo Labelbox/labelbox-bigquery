@@ -7,7 +7,7 @@ setuptools.setup(
     name="labelbox_bigquery",
     version="0.1.0",
     author="Labelbox",
-    author_email="ecosystem+bigquery@labelbox.com",
+    author_email="raphael@labelbox.com",
     description="Labelbox Connector for BigQuery",
     long_description=long_description,
     long_description_content_type="text/markdown",
