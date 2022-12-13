@@ -35,7 +35,7 @@ class Client:
         lb_app_url="https://app.labelbox.com"):  
 
         self.lb_client = labelboxClient(lb_api_key, endpoint=lb_endpoint, enable_experimental=lb_enable_experimental, app_url=lb_app_url)
-        bq_creds = service_account.Credentials.from_service_account_file(google_key)
+        bq_creds = service_account.Credentials.from_service_account_file(google_key) if google_key else None
         self.bq_client = bigquery.Client(project=google_project_name, credentials=bq_creds)
     
     def _sync_metadata_fields(self, bq_table_id, metadata_index={}):
@@ -138,27 +138,28 @@ class Client:
         global_keys_list = list(global_key_to_upload_dict.keys())
         payload = __check_global_keys(client, global_keys_list)
         loop_counter = 0
-        while len(payload['notFoundGlobalKeys']) != len(global_keys_list):
-            loop_counter += 1
-            if payload['deletedDataRowGlobalKeys']:
-                client.clear_global_keys(payload['deletedDataRowGlobalKeys'])
-                payload = __check_global_keys(client, global_keys_list)
-                continue
-            if payload['fetchedDataRows']:
-                for i in range(0, len(payload['fetchedDataRows'])):
-                    if payload['fetchedDataRows'][i] != "":
-                        if skip_duplicates:
-                            global_key = str(global_keys_list[i])
-                            del global_key_to_upload_dict[str(global_key)]
-                        else:
-                            global_key = str(global_keys_list[i])
-                            new_upload_dict = global_key_to_upload_dict[str(global_key)]
-                            del global_key_to_upload_dict[str(global_key)]
-                            new_global_key = f"{global_key}_{loop_counter}"
-                            new_upload_dict['global_key'] = new_global_key
-                            global_key_to_upload_dict[new_global_key] = new_upload_dict
-                global_keys_list = list(global_key_to_upload_dict.keys())
-                payload = __check_global_keys(client, global_keys_list)
+        if payload:
+            while len(payload['notFoundGlobalKeys']) != len(global_keys_list):
+                loop_counter += 1
+                if payload['deletedDataRowGlobalKeys']:
+                    client.clear_global_keys(payload['deletedDataRowGlobalKeys'])
+                    payload = __check_global_keys(client, global_keys_list)
+                    continue
+                if payload['fetchedDataRows']:
+                    for i in range(0, len(payload['fetchedDataRows'])):
+                        if payload['fetchedDataRows'][i] != "":
+                            if skip_duplicates:
+                                global_key = str(global_keys_list[i])
+                                del global_key_to_upload_dict[str(global_key)]
+                            else:
+                                global_key = str(global_keys_list[i])
+                                new_upload_dict = global_key_to_upload_dict[str(global_key)]
+                                del global_key_to_upload_dict[str(global_key)]
+                                new_global_key = f"{global_key}_{loop_counter}"
+                                new_upload_dict['global_key'] = new_global_key
+                                global_key_to_upload_dict[new_global_key] = new_upload_dict
+                    global_keys_list = list(global_key_to_upload_dict.keys())
+                    payload = __check_global_keys(client, global_keys_list)
         upload_list = list(global_key_to_upload_dict.values())
         upload_results = []
         for i in range(0,len(upload_list),batch_size):
