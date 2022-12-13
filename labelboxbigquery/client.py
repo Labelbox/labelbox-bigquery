@@ -127,6 +127,7 @@ class Client:
             Returns:
                 True if global keys are available, False if not
             """
+            query_keys = [str(x) for x in global_keys]
             # Create a query job to get data row IDs given global keys
             query_str_1 = """query get_datarow_with_global_key($global_keys:[ID!]!){dataRowsForGlobalKeys(where:{ids:$global_keys}){jobId}}"""
             query_job_id = client.execute(query_str_1, {"global_keys":global_keys})['dataRowsForGlobalKeys']['jobId']
@@ -135,7 +136,7 @@ class Client:
                             accessDeniedGlobalKeys\ndeletedDataRowGlobalKeys\nfetchedDataRows{id}\nnotFoundGlobalKeys}jobStatus}}"""
             res = client.execute(query_str_2, {"job_id":query_job_id})['dataRowsForGlobalKeysResult']['data']
             return res
-        global_keys_list = [str(x) for x in global_key_to_upload_dict.keys()]
+        global_keys_list = list(global_key_to_upload_dict.keys())
         payload = __check_global_keys(client, global_keys_list)
         loop_counter = 0
         while len(payload['notFoundGlobalKeys']) != len(global_keys_list):
@@ -157,7 +158,7 @@ class Client:
                             new_global_key = f"{global_key}_{loop_counter}"
                             new_upload_dict['global_key'] = new_global_key
                             global_key_to_upload_dict[new_global_key] = new_upload_dict
-                global_keys_list = [str(x) for x in global_key_to_upload_dict.keys()]
+                global_keys_list = list(global_key_to_upload_dict.keys())
                 payload = __check_global_keys(client, global_keys_list)
         upload_list = list(global_key_to_upload_dict.values())
         upload_results = []
