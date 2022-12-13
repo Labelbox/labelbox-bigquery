@@ -4,7 +4,7 @@ with open("README.md", "r") as fh:
     long_description = fh.read()
 
 setuptools.setup(
-    name="labelbox_bigquery",
+    name="labelboxbigquery",
     version="0.1.0",
     author="Labelbox",
     author_email="raphael@labelbox.com",
