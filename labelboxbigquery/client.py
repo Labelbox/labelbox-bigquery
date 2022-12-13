@@ -14,9 +14,11 @@ class Client:
         lb_endpoint                 :   Optinoal (bool) - Labelbox GraphQL endpoint
         lb_enable_experimental      :   Optional (bool) - If `True` enables experimental Labelbox SDK features
         lb_app_url                  :   Optional (str) - Labelbox web app URL
+        
     Attributes:
         lb_client                   :   labelbox.Client object
         bq_client                   :   bigquery.Client object
+        
     Key Functions:
         create_data_rows_from_table :   Creates Labelbox data rows (and metadata) given a BigQuery table
         create_table_from_dataset   :   Creates a BigQuery table given a Labelbox dataset
