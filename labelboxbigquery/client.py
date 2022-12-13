@@ -134,32 +134,31 @@ class Client:
             query_str_2 = """query get_job_result($job_id:ID!){dataRowsForGlobalKeysResult(jobId:{id:$job_id}){data{
                             accessDeniedGlobalKeys\ndeletedDataRowGlobalKeys\nfetchedDataRows{id}\nnotFoundGlobalKeys}jobStatus}}"""
             res = client.execute(query_str_2, {"job_id":query_job_id})['dataRowsForGlobalKeysResult']['data']
-            return res    
-        global_keys_list = list(global_key_to_upload_dict.keys())
+            return res
+        global_keys_list = [str(x) for x in global_key_to_upload_dict.keys()]
         payload = __check_global_keys(client, global_keys_list)
         loop_counter = 0
-        if payload:
-            while len(payload['notFoundGlobalKeys']) != len(global_keys_list):
-                loop_counter += 1
-                if payload['deletedDataRowGlobalKeys']:
-                    client.clear_global_keys(payload['deletedDataRowGlobalKeys'])
-                    payload = __check_global_keys(client, global_keys_list)
-                    continue
-                if payload['fetchedDataRows']:
-                    for i in range(0, len(payload['fetchedDataRows'])):
-                        if payload['fetchedDataRows'][i] != "":
-                            if skip_duplicates:
-                                global_key = str(global_keys_list[i])
-                                del global_key_to_upload_dict[str(global_key)]
-                            else:
-                                global_key = str(global_keys_list[i])
-                                new_upload_dict = global_key_to_upload_dict[str(global_key)]
-                                del global_key_to_upload_dict[str(global_key)]
-                                new_global_key = f"{global_key}_{loop_counter}"
-                                new_upload_dict['global_key'] = new_global_key
-                                global_key_to_upload_dict[new_global_key] = new_upload_dict
-                    global_keys_list = list(global_key_to_upload_dict.keys())
-                    payload = __check_global_keys(client, global_keys_list)
+        while len(payload['notFoundGlobalKeys']) != len(global_keys_list):
+            loop_counter += 1
+            if payload['deletedDataRowGlobalKeys']:
+                client.clear_global_keys(payload['deletedDataRowGlobalKeys'])
+                payload = __check_global_keys(client, global_keys_list)
+                continue
+            if payload['fetchedDataRows']:
+                for i in range(0, len(payload['fetchedDataRows'])):
+                    if payload['fetchedDataRows'][i] != "":
+                        if skip_duplicates:
+                            global_key = str(global_keys_list[i])
+                            del global_key_to_upload_dict[str(global_key)]
+                        else:
+                            global_key = str(global_keys_list[i])
+                            new_upload_dict = global_key_to_upload_dict[str(global_key)]
+                            del global_key_to_upload_dict[str(global_key)]
+                            new_global_key = f"{global_key}_{loop_counter}"
+                            new_upload_dict['global_key'] = new_global_key
+                            global_key_to_upload_dict[new_global_key] = new_upload_dict
+                global_keys_list = [str(x) for x in global_key_to_upload_dict.keys()]
+                payload = __check_global_keys(client, global_keys_list)
         upload_list = list(global_key_to_upload_dict.values())
         upload_results = []
         for i in range(0,len(upload_list),batch_size):
