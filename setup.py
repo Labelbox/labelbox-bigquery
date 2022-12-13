@@ -14,5 +14,5 @@ setuptools.setup(
     url="https://labelbox.com",
     packages=setuptools.find_packages(),
     install_requires=["labelbox", "google-cloud-bigquery"],
-    keywords=["labelbox", "bigquery", "labelbox_bigquery"],
+    keywords=["labelbox", "bigquery", "labelboxbigquery"],
 )
