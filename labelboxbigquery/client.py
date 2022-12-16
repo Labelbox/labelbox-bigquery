@@ -139,32 +139,33 @@ class Client:
         global_keys_list = list(global_key_to_upload_dict.keys())
         payload = __check_global_keys(client, global_keys_list)
         loop_counter = 0
-        while len(payload['notFoundGlobalKeys']) != len(global_keys_list):
-            loop_counter += 1
-            if payload['deletedDataRowGlobalKeys']:
-                client.clear_global_keys(payload['deletedDataRowGlobalKeys'])
-                payload = __check_global_keys(client, global_keys_list)
-                continue
-            if payload['fetchedDataRows']:
-                for i in range(0, len(payload['fetchedDataRows'])):
-                    if payload['fetchedDataRows'][i] != "":
-                        if skip_duplicates:
-                            global_key = str(global_keys_list[i])
-                            del global_key_to_upload_dict[str(global_key)]
-                        else:
-                            global_key = str(global_keys_list[i])
-                            new_upload_dict = global_key_to_upload_dict[str(global_key)]
-                            del global_key_to_upload_dict[str(global_key)]
-                            new_global_key = f"{global_key}_{loop_counter}"
-                            new_upload_dict['global_key'] = new_global_key
-                            global_key_to_upload_dict[new_global_key] = new_upload_dict
-                global_keys_list = list(global_key_to_upload_dict.keys())
-                payload = __check_global_keys(client, global_keys_list)
+        if payload:
+            while len(payload['notFoundGlobalKeys']) != len(global_keys_list):
+                loop_counter += 1
+                if payload['deletedDataRowGlobalKeys']:
+                    client.clear_global_keys(payload['deletedDataRowGlobalKeys'])
+                    payload = __check_global_keys(client, global_keys_list)
+                    continue
+                if payload['fetchedDataRows']:
+                    for i in range(0, len(payload['fetchedDataRows'])):
+                        if payload['fetchedDataRows'][i] != "":
+                            if skip_duplicates:
+                                global_key = str(global_keys_list[i])
+                                del global_key_to_upload_dict[str(global_key)]
+                            else:
+                                global_key = str(global_keys_list[i])
+                                new_upload_dict = global_key_to_upload_dict[str(global_key)]
+                                del global_key_to_upload_dict[str(global_key)]
+                                new_global_key = f"{global_key}_{loop_counter}"
+                                new_upload_dict['global_key'] = new_global_key
+                                global_key_to_upload_dict[new_global_key] = new_upload_dict
+                    global_keys_list = list(global_key_to_upload_dict.keys())
+                    payload = __check_global_keys(client, global_keys_list)
         upload_list = list(global_key_to_upload_dict.values())
         upload_results = []
         for i in range(0,len(upload_list),batch_size):
             batch = upload_list[i:] if i + batch_size >= len(upload_list) else upload_list[i:i+batch_size]
-            task = lb_dataset.create_data_rows(batch)
+            task = dataset.create_data_rows(batch)
             errors = task.errors
             if errors:
                 print(f'Data Row Creation Error: {errors}')
@@ -260,7 +261,7 @@ class Client:
             data_row_upload_dict = {
                 "row_data" : row[query_lookup[row_data_col]],
                 "metadata_fields" : [{"schema_id":metadata_name_key_to_schema['lb_integration_source'],"value":"BigQuery"}],
-                "global_key" : row[query_lookup[global_key_col]]
+                "global_key" : str(row[query_lookup[global_key_col]])
             }
             if external_id_col:
                 data_row_upload_dict['external_id'] = row[query_lookup[external_id_col]]
@@ -392,13 +393,13 @@ class Client:
                 query_job.result()
         print(f'Success')
 
-    def upsert_labelbox_metadata(self, bq_table_id, global_key_col, global_keys_list=[], metadata_fields=[]):
+    def upsert_labelbox_metadata(self, bq_table_id, global_key_col, global_keys_list=[], metadata_index={}):
         """ Updates Labelbox data row metadata based on the most recent metadata from a Databricks spark table, only updates metadata fields provided via a metadata_index keys
         Args:
             bq_table_id         :   Required (str) - BigQuery Table ID structured in the following format: "google_project_name.dataset_name.table_name"
             global_key_col      :   Required (str) - Global key column name to map Labelbox data rows to the BigQuery table rows
             global_keys_list    :   Optional (list) - List of global keys you wish to upsert - defaults to the whole table
-            metadata_fields     :   Optional (dict) - List of column names to to upsert in the table
+            metadata_index      :   Optional (dict) - Dictionary where {key=column_name : value=metadata_type} - metadata_type must be one of "enum", "string", "datetime" or "number"        
         Returns:
             List of errors from metadata ontology bulk upsert - if successful, is an empty list
         """
@@ -412,7 +413,7 @@ class Client:
         metadata_name_key_to_schema = self.__get_metadata_schema_to_name_key(lb_mdo, invert=True)        
         # Create a query to pull global key and metadata from BigQuery
         col_query = f"""{global_key_col}, """
-        for metadata_field in metadata_fields:
+        for metadata_field in list(metadata_index.keys()):
             col_query += metadata_field
         query_str = f"""SELECT {col_query} FROM {bq_table_id}"""            
         query_job = self.bq_client.query(query_str)
@@ -431,7 +432,7 @@ class Client:
             new_metadata = data_row.fields[:]
             for field in new_metadata:
                 field_name = metadata_schema_to_name_key[field.schema_id]
-                if field_name in metadata_fields:
+                if field_name in list(metadata_index.keys()):
                     ### Get the table value given a global key for each column in 
                     table_value = query_dict[drid_to_global_key[drid]][field_name]
                     name_key = f"{field_name}///{table_value}"
