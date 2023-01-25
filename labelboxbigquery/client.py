@@ -1,6 +1,7 @@
 import labelbox
 from labelbox import Client as labelboxClient
 from labelbox.schema.data_row_metadata import DataRowMetadataKind
+from labelbase.metadata import sync_metadata_fields, get_metadata_schema_to_name_key
 from google.cloud import bigquery
 from google.oauth2 import service_account
 
