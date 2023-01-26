@@ -1,7 +1,8 @@
-import labelbox
 from labelbox import Client as labelboxClient
-from labelbox.schema.data_row_metadata import DataRowMetadataKind
+from labelbox.schema.data_row_metadata import DataRowMetadataKind, DataRowMetadata
+from labelboxbigquery import connector
 from labelbase.metadata import sync_metadata_fields, get_metadata_schema_to_name_key
+from labelbase.uploaders import batch_create_data_rows
 from google.cloud import bigquery
 from google.oauth2 import service_account
 
@@ -37,121 +38,53 @@ class Client:
 
         self.lb_client = labelboxClient(lb_api_key, endpoint=lb_endpoint, enable_experimental=lb_enable_experimental, app_url=lb_app_url)
         bq_creds = service_account.Credentials.from_service_account_file(google_key) if google_key else None
-        self.bq_client = bigquery.Client(project=google_project_name, credentials=bq_creds)
+        self.bq_client = bigquery.Client(project=google_project_name, credentials=bq_creds) 
 
     def create_data_rows_from_table(self, bq_table_id, lb_dataset, row_data_col, global_key_col=None, external_id_col=None, metadata_index={}, attachment_index={}, skip_duplicates=False):
         """ Creates Labelbox data rows given a BigQuery table and a Labelbox Dataset
         Args:
-            bq_table_id       : Required (str) - BigQuery Table ID structured in the following format: "google_project_name.dataset_name.table_name"
-            lb_dataset        : Required (labelbox.schema.dataset.Dataset) - Labelbox dataset to add data rows to            
-            row_data_col      : Required (str) - Column name where the data row row data URL is located
-            global_key_col    : Optional (str) - Column name where the data row global key is located - defaults to the row_data column
-            external_id_col   : Optional (str) - Column name where the data row external ID is located - defaults to the row_data column
-            metadata_index    : Optional (dict) - Dictionary where {key=column_name : value=metadata_type} - metadata_type must be one of "enum", "string", "datetime" or "number"
-            attachment_index  : Optional (dict) - Dictionary where {key=column_name : value=attachment_type} - attachment_type must be one of "IMAGE", "VIDEO", "TEXT", "HTML"
+            bq_table_id         : Required (str) - BigQuery Table ID structured in the following format: "google_project_name.dataset_name.table_name"
+            lb_dataset          : Required (labelbox.schema.dataset.Dataset) - Labelbox dataset to add data rows to            
+            row_data_col        : Required (str) - Column name where the data row row data URL is located
+            global_key_col      : Optional (str) - Column name where the data row global key is located - defaults to the row_data column
+            external_id_col     : Optional (str) - Column name where the data row external ID is located - defaults to the row_data column
+            metadata_index      : Optional (dict) - Dictionary where {key=column_name : value=metadata_type} - metadata_type must be one of "enum", "string", "datetime" or "number"
+            attachment_index    : Optional (dict) - Dictionary where {key=column_name : value=attachment_type}
+                                    attachment_type must be one of "IMAGE", "VIDEO", "RAW_TEXT", "HTML", "TEXT_URL"
             skip_duplicates   : Optional (bool) - If True, will skip duplicate global_keys, otherwise will generate a unique global_key with a suffix "_1", "_2" and so on
         Returns:
             List of errors from data row upload - if successful, is an empty list
         """
-        # Sync metadata index keys with metadata ontology   
         table = sync_metadata_fields(
-            client=self.lb_client, table=self.bq_client.get_table(bq_table_id)  , get_columns_function=connector.get_columns_function, 
-            add_column_function=connector.add_column_function, get_unique_values_function=connector.get_unique_values_function, 
-            metadata_index=metadata_index, verbose=verbose, extra_client=self.bq_client
+            client=self.lb_client, table=table, get_columns_function=connector.get_columns_function, add_column_function=connector.add_column_function, 
+            get_unique_values_function=connector.get_unique_values_function, metadata_index=metadata_index, verbose=verbose
+        )        
+        # If df returns False, the sync failed - terminate the upload
+        if type(table) == bool:
+            return {"upload_results" : [], "conversion_errors" : []}
+        
+        # Create a dictionary where {key=global_key : value=labelbox_upload_dictionary} - this is unique to Pandas
+        global_key_to_upload_dict, conversion_errors = connector.create_upload_dict(
+            table=table, lb_client=self.lb_client, bq_client=self.bq_client,
+            row_data_col=row_data_col, global_key_col=global_key_col, external_id_col=external_id_col, 
+            metadata_index=metadata_index, local_files=local_files, divider=divider, verbose=verbose
         )
-        # Create a metadata_schema_dict where {key=metadata_field_name : value=metadata_schema_id}
-        lb_mdo = self.lb_client.get_data_row_metadata_ontology()
-        metadata_name_key_to_schema = self.__get_metadata_schema_to_name_key(lb_mdo, invert=True)
-        # Ensure your row_data, external_id, global_key and metadata_index keys are in your BigQery table, build your query
-        bq_table = self.bq_client.get_table(bq_table_id)
-        column_names = [schema_field.name for schema_field in bq_table.schema]
-        if row_data_col not in column_names:
-            print(f'Error: No column matching provided "row_data_col" column value {row_data_col}')
-            return None
-        else:
-            index_value = 0
-            query_lookup = {row_data_col:index_value}
-            col_query = row_data_col
-            index_value += 1
-        if global_key_col:
-            if global_key_col not in column_names:
-                 print(f'Error: No column matching provided "global_key_col" column value {global_key_col}')
-                 return None
+        # If there are conversion errors, let the user know; if there are no successful conversions, terminate the upload
+        if conversion_errors:
+            print(f'There were {len(conversion_errors)} errors in creating your upload list - see result["conversion_errors"] for more information')
+            if global_key_to_upload_dict:
+                print(f'Data row upload will continue')
             else:
-                col_query += f", {global_key_col}"
-                query_lookup[global_key_col] = index_value
-                index_value += 1
-        else:
-            print(f'No global_key_col provided, will default global_key_col to {row_data_col} column')
-            global_key_col = row_data_col
-            col_query += f", {global_key_col}"
-            query_lookup[global_key_col] = index_value
-            index_value += 1
-        if external_id_col:
-            if external_id_col not in column_names:
-                print(f'Error: No column matching provided "gloabl_key" column value {external_id_col}')
-                return None
-            else:
-                col_query+= f", {external_id_col}"    
-                query_lookup[external_id_col] = index_value            
-                index_value += 1    
-        if metadata_index:
-            for metadata_field_name in metadata_index:
-                mdf = metadata_field_name.replace(" ", "_")
-                if mdf not in column_names:
-                    print(f'Error: No column matching metadata_index key {metadata_field_name}')
-                    return None
-                else:
-                    col_query+=f', {mdf}'
-                    query_lookup[mdf] = index_value
-                    index_value += 1
-        if attachment_index:
-            for attachment_field_name in attachment_index:
-                atf = attachment_field_name.replace(" ", "_")
-                attachment_whitelist = ["IMAGE", "VIDEO", "RAW_TEXT", "HTML", "TEXT_URL"]
-                if attachment_index[attachment_field_name] not in attachment_whitelist:
-                    print(f'Error: Invalid value for attachment_index key {attachment_field_name} : {attachment_index[attachment_field_name]}\n must be one of {attachment_whitelist}')
-                    return None
-                if atf not in column_names:
-                    print(f'Error: No column matching attachment_index key {attachment_field_name}')
-                    return None
-                else:
-                    col_query+=f', {atf}'
-                    query_lookup[atf] = index_value
-                    index_value += 1                
-        # Query your row_data, external_id, global_key and metadata_index key columns from 
-        query = f"""SELECT {col_query} FROM {bq_table.project}.{bq_table.dataset_id}.{bq_table.table_id}"""
-        query_job = self.bq_client.query(query)
-        # Iterate over your query payload to construct a list of data row dictionaries in Labelbox format
-        global_key_to_upload_dict = {}
-        for row in query_job:
-            data_row_upload_dict = {
-                "row_data" : row[query_lookup[row_data_col]],
-                "metadata_fields" : [{"schema_id":metadata_name_key_to_schema['lb_integration_source'],"value":"BigQuery"}],
-                "global_key" : str(row[query_lookup[global_key_col]])
-            }
-            if external_id_col:
-                data_row_upload_dict['external_id'] = row[query_lookup[external_id_col]]
-            if metadata_index:
-                for metadata_field_name in metadata_index:
-                    mdf = metadata_field_name.replace(" ", "_")
-                    metadata_schema_id = metadata_name_key_to_schema[metadata_field_name]
-                    mdx_value = f"{metadata_field_name}///{row[query_lookup[mdf]]}"
-                    if mdx_value in metadata_name_key_to_schema.keys():
-                        metadata_value = metadata_name_key_to_schema[mdx_value]
-                    else:
-                        metadata_value = row[query_lookup[mdf]]
-                    data_row_upload_dict['metadata_fields'].append({
-                        "schema_id" : metadata_schema_id,
-                        "value" : metadata_value
-                    })
-            if attachment_index:
-                data_row_upload_dict['attachments'] = [{"type" : attachment_index[attachment_field_name], "value" : row[query_lookup[attachment_field_name]]} for attachment_field_name in attachment_index]
-            global_key_to_upload_dict[row[query_lookup[global_key_col]]] = data_row_upload_dict
-        # Batch upload your list of data row dictionaries in Labelbox format
-        upload_results = self.__batch_create_data_rows(client=self.lb_client, dataset=lb_dataset, global_key_to_upload_dict=global_key_to_upload_dict)
-        print(f'Success')
-        return upload_results
+                print(f'Data row upload will not continue')  
+                return {"upload_results" : [], "conversion_errors" : errors}
+            
+        # Upload your data rows to Labelbox
+        upload_results = batch_create_data_rows(
+            client=self.lb_client, dataset=lb_dataset, global_key_to_upload_dict=global_key_to_upload_dict, 
+            skip_duplicates=skip_duplicates, divider=divider, verbose=verbose
+        )
+        return {"upload_results" : upload_results, "conversion_errors" : conversion_errors}            
+    
 
     def create_table_from_dataset(self, bq_dataset_id, bq_table_name, lb_dataset, metadata_index={}):
         """ Creates a BigQuery Table from a Labelbox dataset given a BigQuery Dataset ID, desired Table name, and optional metadata_index
@@ -222,9 +155,10 @@ class Client:
             Updated BigQuery table
         """
         # Sync metadata index keys with metadata ontology
-        check = self._sync_metadata_fields(bq_table_id, metadata_index)
-        if not check:
-          return None        
+        bq_table = sync_metadata_fields(
+            client=self.lb_client, table=table, get_columns_function=connector.get_columns_function, add_column_function=connector.add_column_function, 
+            get_unique_values_function=connector.get_unique_values_function, metadata_index=metadata_index, verbose=verbose
+        )      
         bq_table = self.bq_client.get_table(bq_table_id)
         data_rows = lb_dataset.export_data_rows(include_metadata=True)
         metadata_schema_to_name_key = self.__get_metadata_schema_to_name_key(self.lb_client.get_data_row_metadata_ontology(), invert=False)
@@ -304,6 +238,6 @@ class Client:
                     table_value = query_dict[drid_to_global_key[drid]][field_name]
                     name_key = f"{field_name}///{table_value}"
                     field.value = metadata_name_key_to_schema[name_key] if name_key in metadata_name_key_to_schema.keys() else table_value
-            upload_metadata.append(labelbox.schema.data_row_metadata.DataRowMetadata(data_row_id=drid, fields=new_metadata))
+            upload_metadata.append(DataRowMetadata(data_row_id=drid, fields=new_metadata))
         results = lb_mdo.bulk_upsert(upload_metadata)
         return results        
