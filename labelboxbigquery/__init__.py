@@ -1,1 +1,1 @@
-from labelbox_bigquery.client import Client
+from labelboxbigquery.client import Client
