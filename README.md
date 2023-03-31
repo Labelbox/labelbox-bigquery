@@ -31,7 +31,7 @@ This library is currently in beta. It may contain errors or inaccuracies and may
 Install Labelbox-BigQuery to your Python environment. The installation will also add the Labelbox SDK and BigQuery SDK.
 
 ```
-pip install labelbox-bigquery
+pip install labelbigquery
 import labelboxbigquery
 ```
 
