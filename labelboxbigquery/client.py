@@ -283,6 +283,8 @@ class Client:
                 data_row_upload_dict['attachments'] = [{"type" : attachment_index[attachment_field_name], "value" : row[query_lookup[attachment_field_name]]} for attachment_field_name in attachment_index]
             global_key_to_upload_dict[row[query_lookup[global_key_col]]] = data_row_upload_dict
         # Batch upload your list of data row dictionaries in Labelbox format
+        if type(lb_dataset) == str):
+            lb_dataset = self.lb_client.get_dataset(lb_dataset)
         upload_results = self.__batch_create_data_rows(client=self.lb_client, dataset=lb_dataset, global_key_to_upload_dict=global_key_to_upload_dict)
         print(f'Success')
         return upload_results
