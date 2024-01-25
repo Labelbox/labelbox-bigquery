@@ -202,12 +202,14 @@ class Client:
             include_label_details=include_label_details, mask_method=mask_method, verbose=verbose, divider=divider,
             export_filters=export_filters
         )
+        if len(flattened_labels_dict) == 0:
+            if verbose:
+                print("No labels were found in the project export")
+            return
 
         #Make sure all 
         flattened_labels_dict = [{key: str(val) for key, val in dict.items()} for dict in flattened_labels_dict]
 
-        for row in flattened_labels_dict:   
-            row['global_key'] = str(uuid4())
         table = pd.DataFrame.from_dict(flattened_labels_dict)
         label_ids = table['label_id'].to_numpy()
         labels_str = ""
