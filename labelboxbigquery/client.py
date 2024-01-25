@@ -1,18 +1,13 @@
 import labelbox
 from labelbox import Client as labelboxClient
 from labelbox.schema.data_row_metadata import DataRowMetadataKind
-from labelbase.metadata import sync_metadata_fields, get_metadata_schema_to_name_key
 from labelbase.downloader import export_and_flatten_labels
 from google.cloud import bigquery
 from google.oauth2 import service_account
 from uuid import uuid4
 import pandas as pd
-import labelpandas
 from datetime import datetime
-import ast
 
-#TODO- remove
-import sys
 
 # BigQuery limits special characters that can be used in column names and they have to be unicode
 DIVIDER_MAPPINGS = {'&' : '\u0026', '%' : '\u0025', '>' : '\u003E', '#' : '\u0023', '|' : '\u007c'}
@@ -49,19 +44,7 @@ class Client:
         self.lb_client = labelboxClient(lb_api_key, endpoint=lb_endpoint, enable_experimental=lb_enable_experimental, app_url=lb_app_url)
         self.bq_creds = service_account.Credentials.from_service_account_file(google_key) if google_key else None
         self.bq_client = bigquery.Client(project=google_project_name, credentials=self.bq_creds)
-        self.lp_client = labelpandas.Client(lb_api_key=lb_api_key)
         self.google_project_name = google_project_name
-
-
-
-
-
-
-
-
-
-
-
 
     def _validate_divider(self, divider):
         unicode_divider = ''
@@ -220,7 +203,6 @@ class Client:
 
         #Make sure all 
         flattened_labels_dict = [{key: str(val) for key, val in dict.items()} for dict in flattened_labels_dict]
-        print(flattened_labels_dict)
 
         for row in flattened_labels_dict:   
             row['global_key'] = str(uuid4())
@@ -236,6 +218,8 @@ class Client:
         
         if create_table:
             bq_table = self.bq_client.create_table(bigquery.Table(f"{self.google_project_name}.{bq_dataset_id}.{bq_table_name}", schema=table_schema))
+            if verbose:
+                print(f'Created BigQuery Table with ID {bq_table.table_id}')
             labels_to_insert = flattened_labels_dict
         else:
             bq_table = self.bq_client.get_table(bigquery.Table(f"{self.google_project_name}.{bq_dataset_id}.{bq_table_name}"))
@@ -245,10 +229,8 @@ class Client:
                 WHERE label_id in ({1})
             """
             query = query.format(f"{self.google_project_name}.{bq_dataset_id}.{bq_table_name}", labels_str)
-            print(query)
-            query_job = self.bq_client.query(query)  # API request
+            query_job = self.bq_client.query(query)
             rows = list(query_job.result())
-            # rows = self.bq_client.query_and_wait(query)
             labels_to_update = []
             labels_to_insert = []
             for label in flattened_labels_dict:
@@ -269,97 +251,22 @@ class Client:
                 )
                 job = self.bq_client.load_table_from_json(
                     flattened_labels_dict, f"{self.google_project_name}.{bq_dataset_id}.{bq_table_name}", job_config=job_config
-                )  # Make an API request.
-                print(job.result().errors())
-                return
-        print(f"inserting {len(labels_to_insert)} data rows to table")
+                ) 
+                errors = job.result().errors
+                if not errors and verbose:
+                    print(f'Successfully updated table. {len(labels_to_update)} rows were updated and {len(labels_to_insert)} new rows were inserted')
+                elif verbose:
+                    print(errors)
+                return errors
+        if verbose:
+            print(f"inserting {len(labels_to_insert)} data rows to table")
         errors = self.bq_client.insert_rows_json(bq_table, labels_to_insert)
-        if not errors:
-            print(f'Success\nCreated BigQuery Table with ID {bq_table.table_id}')
-        else:
-            print(errors)
+        if not errors and verbose:
+            print(f'Insert job successful')
+        elif verbose:
+            print(f"There are errors present:\n {errors}")
         return errors
 
-    def create_data_rows_from_table_lp(self, bq_credential_json, bq_table_id, dataset_id, project_id, model_id, model_run_id, row_data_col, global_key_col, external_id_col, metadata_index={}, attachment_index={},  divider="|||", upload_method="", skip_duplicates=False, mask_method:str="png", verbose:bool=False):
-        bq_divider = self._validate_divider(divider)
-        print(bq_divider)
-        bq_table = self.bq_client.get_table(bq_table_id)
-        column_names = [schema_field.name for schema_field in bq_table.schema]
-        if row_data_col not in column_names:
-            print(f'Error: No column matching provided "row_data_col" column value {row_data_col}')
-            return None
-        else:
-            index_value = 0
-            query_lookup = {row_data_col:index_value}
-            col_query = row_data_col
-            index_value += 1
-        if global_key_col:
-            if global_key_col not in column_names:
-                 print(f'Error: No column matching provided "global_key_col" column value {global_key_col}')
-                 return None
-            else:
-                col_query += f", {global_key_col}"
-                query_lookup[global_key_col] = index_value
-                index_value += 1
-        else:
-            print(f'No global_key_col provided, will default global_key_col to {row_data_col} column')
-            global_key_col = row_data_col
-            col_query += f", {global_key_col}"
-            query_lookup[global_key_col] = index_value
-            index_value += 1
-        if external_id_col:
-            if external_id_col not in column_names:
-                print(f'Error: No column matching provided "gloabl_key" column value {external_id_col}')
-                return None
-            else:
-                col_query+= f", {external_id_col}"    
-                query_lookup[external_id_col] = index_value            
-                index_value += 1    
-        if metadata_index:
-            for metadata_field_name in metadata_index:
-                mdf = metadata_field_name.replace(" ", "_")
-                if mdf not in column_names:
-                    print(f'Error: No column matching metadata_index key {metadata_field_name}')
-                    return None
-                else:
-                    col_query+=f', {mdf}'
-                    query_lookup[mdf] = index_value
-                    index_value += 1
-        if attachment_index:
-            attachment_whitelist = ["IMAGE", "VIDEO", "RAW_TEXT", "HTML", "TEXT_URL"]
-            for attachment_field_name in attachment_index:
-                atf = attachment_field_name.replace(" ", "_")
-                if attachment_index[attachment_field_name] not in attachment_whitelist:
-                    print(f'Error: Invalid value for attachment_index key {attachment_field_name} : {attachment_index[attachment_field_name]}\n must be one of {attachment_whitelist}')
-                    return None
-                if atf not in column_names:
-                    print(f'Error: No column matching attachment_index key {attachment_field_name}')
-                    return None
-                else:
-                    col_query+=f', {atf}'
-                    query_lookup[atf] = index_value
-                    index_value += 1
-        for column in column_names:
-            print(column)
-            if divider in column:
-
-                col_query+= f", `{column.replace(divider, bq_divider)}`"
-                query_lookup[column] = index_value
-                index_value += 1                
-        # Query your row_data, external_id, global_key and metadata_index key columns from 
-        query = f"""SELECT {col_query} FROM {bq_table.project}.{bq_table.dataset_id}.{bq_table.table_id}"""
-        print(query)
-        # query_job = self.bq_client.query(query)
-        # credentials = service_account.Credentials.from_service_account_file(
-        #     bq_credential_json,
-        #     scopes=['https://www.googleapis.com/auth/cloud-platform'])
-        df = pd.read_gbq(query, credentials=self.bq_creds)
-        return_payload = self.lp_client.create_data_rows_from_table(df, dataset_id=dataset_id, project_id=project_id, priority=5, 
-                                                                    upload_method=upload_method, skip_duplicates=skip_duplicates, mask_method=mask_method, verbose=verbose, divider=divider)
-        return return_payload
-
-
-    #TODO - update to use validate columns like in labelpandas
     def create_data_rows_from_table(
             self, bq_table_id:str="", lb_dataset:labelbox.schema.dataset.Dataset=None, row_data_col:str="", global_key_col:str=None, 
             external_id_col:str=None, metadata_index:dict={}, attachment_index:dict={}, skip_duplicates:bool=False, divider:str="|||"):
@@ -641,13 +548,3 @@ class Client:
             upload_metadata.append(labelbox.schema.data_row_metadata.DataRowMetadata(data_row_id=drid, fields=new_metadata))
         results = lb_mdo.bulk_upsert(upload_metadata)
         return results        
-
-
-#testing
-table_name = "bigquery_test_update_3"
-project_id = "clo3jk10r027i07vi4di5026g"
-dataset_name = "testing_labelbox_bigquery"
-google_creds_file = '/Users/luksta/Downloads/test-integration-385419-c039b7e10d74.json'
-project_name = 'test-integration-385419'
-client = Client('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJjbGJwZ3hmYWVod3c2MDc2dGVkbzVland4Iiwib3JnYW5pemF0aW9uSWQiOiJjbGJvNTl6YTUwbDR5MDd6cWMyaHAxdGFkIiwiYXBpS2V5SWQiOiJjbGw1cDMyMTUwaGUwMDcwbGNwY3Vha2llIiwic2VjcmV0IjoiNTM5NTYxZGExMGU1NjZiMDYxMGI4NGM3M2U3NGFiYjgiLCJpYXQiOjE2OTE3MDQzMzgsImV4cCI6MjMyMjg1NjMzOH0.v1xnfQk8hkBcVJaoRPBBIv5R5ou4u12i9wuhP6Ul6VE', google_project_name=project_name, google_key=google_creds_file)
-client.export_to_BigQuery(project_id, dataset_name, table_name, create_table=False, include_label_details=True)
