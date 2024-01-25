@@ -192,13 +192,15 @@ class Client:
     
     def export_to_BigQuery(self, project, bq_dataset_id:str, bq_table_name:str, create_table:bool=False,
                            include_metadata:bool=False, include_performance:bool=False, include_agreement:bool=False,
-                           include_label_details:bool=False, verbose:bool=False, mask_method:str="png", divider="|||"):
+                           include_label_details:bool=False, verbose:bool=False, mask_method:str="png", divider="|||",
+                           export_filters:dict=None):
         
         divider = self._validate_divider(divider)
         flattened_labels_dict = export_and_flatten_labels(
             client=self.lb_client, project=project, include_metadata=include_metadata, 
             include_performance=include_performance, include_agreement=include_agreement,
-            include_label_details=include_label_details, mask_method=mask_method, verbose=verbose, divider=divider
+            include_label_details=include_label_details, mask_method=mask_method, verbose=verbose, divider=divider,
+            export_filters=export_filters
         )
 
         #Make sure all 
