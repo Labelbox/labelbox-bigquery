@@ -33,7 +33,7 @@ jobs:
     needs: ['build']
     environment: 
       name: publish
-      url: 'https://pypi.org/project/labelboxbigquery/'
+      url: 'https://pypi.org/project/labelbigquery/'
     runs-on: ubuntu-latest
     permissions:
       # IMPORTANT: this permission is mandatory for trusted publishing
@@ -42,7 +42,7 @@ jobs:
       - uses: actions/download-artifact@v4
 
       - name: Publish package distributions to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@release/v1.8
         with:
           packages-dir: artifact/
 
