@@ -33,7 +33,7 @@ jobs:
     needs: ['build']
     environment: 
       name: publish
-      url: 'https://pypi.org/project/labelbigquery/'
+      url: 'https://pypi.org/project/labelboxbigquery/'
     runs-on: ubuntu-latest
     permissions:
       # IMPORTANT: this permission is mandatory for trusted publishing
