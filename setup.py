@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="labelboxbigquery",
-    version="0.1.07",
+    version="0.1.8",
     author="Labelbox",
     author_email="raphael@labelbox.com",
     description="Labelbox Connector for BigQuery",
